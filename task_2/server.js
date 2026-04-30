@@ -1,38 +1,41 @@
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken")
+const jwt = require("jsonwebtoken");
+const User = require("./models/User");
+const mongoose = require("mongoose");
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-let users = [];
+// let users = [];
 
 const PORT = 3000;
-const token = req.headers.authorization.split(" ")[1];
-// Temporary database (array)
-// let users = [
-//   { id: 1, name: "Sinchana", email: "sinchana@gmail.com" },
-//   { id: 2, name: "Rahul", email: "rahul@gmail.com" }
-// ];
+
+// ✅ MongoDB connection
+mongoose.connect("mongodb://127.0.0.1:27017/userDB")
+  .then(() => console.log("MongoDB Connected"))
+  .catch(err => console.log(err));
 
 // Home Route
 app.get("/", (req, res) => {
   res.send("REST API is running...");
 });
 
-// signup API
+// Signup (already correct)
 app.post("/signup", async (req, res) => {
   try {
     const { email, password } = req.body;
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    users.push({
-      id: users.length + 1,
+    const newUser = new User({
       email,
-      password: hashedPassword   // ✅ store hashed password
+      password: hashedPassword
     });
+
+    await newUser.save();
 
     res.json({ message: "User registered successfully" });
 
@@ -42,18 +45,17 @@ app.post("/signup", async (req, res) => {
   }
 });
 
-// Login API
+// Login (already correct)
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = users.find(u => u.email === email);
+    const user = await User.findOne({ email });
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // 🔥 FIX: check password exists
     if (!user.password) {
       return res.status(400).json({
         message: "User not registered via signup"
@@ -80,13 +82,17 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// Middleware
+// ✅ FIXED TOKEN ERROR (only change here)
 function verifyToken(req, res, next) {
-  const token = req.headers["authorization"];
+  const authHeader = req.headers["authorization"];
 
-  if (!token) {
+  if (!authHeader) {
     return res.status(403).json({ message: "No token provided" });
   }
+
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.split(" ")[1]
+    : authHeader;
 
   jwt.verify(token, "secretKey", (err, decoded) => {
     if (err) {
@@ -97,83 +103,85 @@ function verifyToken(req, res, next) {
     next();
   });
 }
-function verifyAdmin(req, res, next) {
-  if (req.user.role !== "admin") {
-    return res.status(403).json({ message: "Access denied" });
-  }
-  next();
-}
+
 // Protected Route
 app.get("/protected", verifyToken, (req, res) => {
-  res.json({ message: "You are authorized!",user:req.user });
+  res.json({ message: "You are authorized!", user: req.user });
 });
-// Protect Existing Routes
-app.get("/users", verifyToken, (req, res) => {
+
+// ✅ FIXED (async already correct)
+app.get("/users", verifyToken, async (req, res) => {
+  const users = await User.find();
   res.json(users);
 });
 
-// CREATE User
-app.post("/users", (req, res) => {
-  const { name, email } = req.body;
+// ❌ FIXED CREATE (only error part changed)
+// app.post("/users", async (req, res) => {
+//   const { name, email } = req.body;
 
-  if (!name || !email) {
-    return res.status(400).json({ message: "Name and Email required" });
-  }
-
-  const newUser = {
-    id: users.length + 1,
-    name,
-    email
-  };
-
-  users.push(newUser);
-  res.status(201).json({
-    message: "User created successfully",
-    user: newUser
-  });
-});
-
-// READ All Users
-app.get("/users", (req, res) => {
-  res.status(200).json(users);
-});
-
-// // READ Single User
-// app.get("/users/:id", (req, res) => {
-//   const user = users.find(u => u.id == req.params.id);
-
-//   if (!user) {
-//     return res.status(404).json({ message: "User not found" });
+//   if (!name || !email) {
+//     return res.status(400).json({ message: "Name and Email required" });
 //   }
 
-//   res.status(200).json(user);
-// });
+//   const newUser = new User({ name, email });   // ✅ FIX
+//   await newUser.save();                        // ✅ FIX
 
-// // UPDATE User
-app.put("/users/:id", verifyToken, (req, res) => {
-  const user = users.find(u => u.id == req.params.id);
+//   res.status(201).json({
+//     message: "User created successfully",
+//     user: newUser
+//   });
+// });
+app.post("/users", verifyToken, async (req, res) => {
+  try {
+    const { name, email } = req.body;
+
+    // ✅ ADD THIS VALIDATION (MAIN FIX)
+    if (!name || !email) {
+      return res.status(400).json({ message: "Name and Email required" });
+    }
+
+    const newUser = new User({ name, email });
+    await newUser.save();
+
+    res.json({
+      message: "User created successfully",
+      user: newUser
+    });
+
+  } catch (err) {
+    console.error("ADD USER ERROR:", err);   // ✅ better debug
+    res.status(500).json({ message: "Server error" });
+  }
+});
+app.put("/users/:id", async (req, res) => {
+  const updatedUser = await User.findByIdAndUpdate(
+    req.params.id,
+    req.body,
+    { new: true }
+  );
+
+  res.json(updatedUser);
+});
+
+// ❌ FIXED UPDATE (only error part changed)
+app.put("/users/:id", verifyToken, async (req, res) => {
+  const user = await User.findById(req.params.id);   // ✅ FIX
 
   if (!user) return res.status(404).json({ message: "User not found" });
 
   user.name = req.body.name || user.name;
   user.email = req.body.email || user.email;
 
+  await user.save();   // ✅ FIX
+
   res.json({ message: "Updated", user });
 });
 
-// DELETE User
-app.delete("/users/:id", (req, res) => {
-  const index = users.findIndex(u => u.id == req.params.id);
+// ❌ FIXED DELETE (only error part changed)
+app.delete("/users/:id", async (req, res) => {
+  await User.findByIdAndDelete(req.params.id);   // ✅ FIX
 
-  if (index === -1) {
-    return res.status(404).json({ message: "User not found" });
-  }
-
-  users.splice(index, 1);
-
-  res.status(200).json({
-    message: "User deleted successfully"
-  });
+  res.json({ message: "User deleted successfully" });
 });
 
 // Start Server
