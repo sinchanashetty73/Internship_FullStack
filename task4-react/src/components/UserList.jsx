@@ -1,4 +1,4 @@
-function UserList({ users, deleteUser }) {
+function UserList({ users, deleteUser,updateUser }) {
   if (users.length === 0) {
     return <p className="empty">No users found</p>;
   }
@@ -6,7 +6,7 @@ function UserList({ users, deleteUser }) {
   return (
     <div className="user-list">
       {users.map((user) => (
-        <div key={user.id} className="user-card">
+        <div key={user._id} className="user-card">
           <div className="user-info">
             <h3>{user.name}</h3>
             <p>{user.email}</p>
@@ -14,10 +14,13 @@ function UserList({ users, deleteUser }) {
 
           <button
             className="delete-btn"
-            onClick={() => deleteUser(user.id)}
+            onClick={() => deleteUser(user._id)}
           >
             Delete
           </button>
+          <button onClick={() => updateUser(user._id)}>
+          Edit
+        </button>
         </div>
       ))}
     </div>

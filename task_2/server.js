@@ -4,7 +4,9 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const User = require("./models/User");
 const mongoose = require("mongoose");
-
+const AuthUser = require("./models/AuthUser"); 
+const {  verifyAdmin } = require("./middleware/auth");
+require("dotenv").config();
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -25,62 +27,61 @@ app.get("/", (req, res) => {
 
 // Signup (already correct)
 app.post("/signup", async (req, res) => {
-  try {
-    const { email, password } = req.body;
+  const { email, password } = req.body;
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+  const hashedPassword = await bcrypt.hash(password, 10);
 
-    const newUser = new User({
-      email,
-      password: hashedPassword
-    });
+  const user = new AuthUser({
+    email,
+    password: hashedPassword,
+    role: "admin"   // first user = admin
+  });
 
-    await newUser.save();
+  await user.save();
 
-    res.json({ message: "User registered successfully" });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Signup error" });
-  }
+  res.json({ message: "Signup successful" });
 });
 
 // Login (already correct)
 app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
+  const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
+  const user = await AuthUser.findOne({ email });
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+  if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (!user.password) {
-      return res.status(400).json({
-        message: "User not registered via signup"
-      });
-    }
+  const isMatch = await bcrypt.compare(password, user.password);
 
-    const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) return res.status(401).json({ message: "Wrong password" });
 
-    if (!isMatch) {
-      return res.status(401).json({ message: "Invalid password" });
-    }
+  const token = jwt.sign(
+    { id: user.id, role: user.role },   // ✅ role added
+    process.env.JWT_SECRET,
+    { expiresIn: "1h" }
+  );
 
-    const token = jwt.sign(
-      { id: user.id },
-      "secretKey",
-      { expiresIn: "1h" }
-    );
-
-    res.json({ token });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
-  }
+  res.json({ token });
 });
+
+//     const isMatch = await bcrypt.compare(password, user.password);
+
+//     if (!isMatch) {
+//       return res.status(401).json({ message: "Invalid password" });
+//     }
+
+//     const token = jwt.sign(
+//       { id: user.id },
+//       "secretKey",
+//       { expiresIn: "1h" }
+//     );
+
+//     res.json({ token });
+
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
 
 // ✅ FIXED TOKEN ERROR (only change here)
 function verifyToken(req, res, next) {
@@ -94,7 +95,7 @@ function verifyToken(req, res, next) {
     ? authHeader.split(" ")[1]
     : authHeader;
 
-  jwt.verify(token, "secretKey", (err, decoded) => {
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
     if (err) {
       return res.status(401).json({ message: "Invalid token" });
     }
@@ -131,28 +132,24 @@ app.get("/users", verifyToken, async (req, res) => {
 //     user: newUser
 //   });
 // });
-app.post("/users", verifyToken, async (req, res) => {
-  try {
-    const { name, email } = req.body;
+app.post("/users", verifyToken, verifyAdmin, async (req, res) => {
+  const { name, email } = req.body;
 
-    // ✅ ADD THIS VALIDATION (MAIN FIX)
-    if (!name || !email) {
-      return res.status(400).json({ message: "Name and Email required" });
-    }
-
-    const newUser = new User({ name, email });
-    await newUser.save();
-
-    res.json({
-      message: "User created successfully",
-      user: newUser
-    });
-
-  } catch (err) {
-    console.error("ADD USER ERROR:", err);   // ✅ better debug
-    res.status(500).json({ message: "Server error" });
+  if (!name || !email) {
+    return res.status(400).json({ message: "Name & Email required" });
   }
+
+  const newUser = new User({ name, email });
+  await newUser.save();
+
+  res.json({ message: "User added", user: newUser });
 });
+
+//   } catch (err) {
+//     console.error("ADD USER ERROR:", err);   // ✅ better debug
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
 app.put("/users/:id", async (req, res) => {
   const updatedUser = await User.findByIdAndUpdate(
     req.params.id,
@@ -178,10 +175,9 @@ app.put("/users/:id", verifyToken, async (req, res) => {
 });
 
 // ❌ FIXED DELETE (only error part changed)
-app.delete("/users/:id", async (req, res) => {
-  await User.findByIdAndDelete(req.params.id);   // ✅ FIX
-
-  res.json({ message: "User deleted successfully" });
+app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
+  await User.findByIdAndDelete(req.params.id);
+  res.json({ message: "Deleted" });
 });
 
 // Start Server
