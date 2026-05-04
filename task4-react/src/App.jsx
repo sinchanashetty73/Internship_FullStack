@@ -3,12 +3,15 @@ import UserForm from "./components/UserForm";
 import UserList from "./components/UserList";
 import Login from "./components/Login";
 import Signup from "./components/Signup";
+import { io } from "socket.io-client";
+import { useRef } from "react";
 import "./App.css";
 
 function App() {
 
   // ✅ FIX 1: make token reactive
   const [token, setToken] = useState(localStorage.getItem("token"));
+  const socketRef = useRef(null);
 
   const [users, setUsers] = useState([]);
   const [name, setName] = useState("");
@@ -44,10 +47,46 @@ function App() {
     if (token) {
       fetchUsers();
     }
+
+    if (!socketRef.current) {
+      socketRef.current = io("http://localhost:3000");
+    }
+
+    // 🔥 SOCKET EVENTS
+
+    socketRef.current.off("userAdded");
+    socketRef.current.on("userAdded", (newUser) => {
+      setUsers((prev) => [...prev, newUser]);
+    });
+
+    socketRef.current.off("userDeleted");
+    socketRef.current.on("userDeleted", (id) => {
+      setUsers((prev) => prev.filter((u) => u._id !== id));
+    });
+
+    socketRef.current.off("userUpdated");
+    socketRef.current.on("userUpdated", (updatedUser) => {
+   setUsers((prev) =>
+    prev.map((u) =>
+      u._id === updatedUser._id
+        ? { ...u, ...updatedUser }
+        : u
+    )
+  );
+});
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.off("userAdded");
+      socketRef.current.off("userDeleted");
+      socketRef.current.off("userUpdated");
+      }
+    };
   }, [token]);
 
-  // Add user
+  // ✅ FIX 7: ADD MISSING addUser FUNCTION
   const addUser = async (name, email) => {
+    
 
     if (!name || !email) {
       alert("Enter name and email");
@@ -55,6 +94,7 @@ function App() {
     }
 
     await fetch("http://localhost:3000/users", {
+      
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -62,8 +102,9 @@ function App() {
       },
       body: JSON.stringify({ name, email })
     });
+    alert("User added succcessfully");
 
-    fetchUsers();
+    // fetchUsers();
   };
 
   // Update users
@@ -79,8 +120,9 @@ function App() {
       },
       body: JSON.stringify({ name, email })
     });
+    alert("User updated successfully");
 
-    fetchUsers();
+    // fetchUsers();
   };
 
   // Delete user
@@ -93,8 +135,8 @@ function App() {
         Authorization: `Bearer ${token}`
       }
     });
-
-    fetchUsers();
+     alert("User deleted successfully");
+    // fetchUsers();
   };
 
   // Role extraction
@@ -136,10 +178,10 @@ function App() {
           )}
 
           <UserList 
-  users={users} 
-  deleteUser={deleteUser} 
-  updateUser={updateUser}   // ✅ ADD THIS
-/>
+            users={users} 
+            deleteUser={deleteUser} 
+            updateUser={updateUser}   // ✅ ADD THIS
+          />
         </>
       )}
     </div>

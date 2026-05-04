@@ -5,8 +5,11 @@ const jwt = require("jsonwebtoken");
 const User = require("./models/User");
 const mongoose = require("mongoose");
 const AuthUser = require("./models/AuthUser"); 
-const {  verifyAdmin } = require("./middleware/auth");
+const { verifyAdmin } = require("./middleware/auth");
+const http = require("http");
+const { Server } = require("socket.io");
 require("dotenv").config();
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -19,6 +22,15 @@ const PORT = 3000;
 mongoose.connect("mongodb://127.0.0.1:27017/userDB")
   .then(() => console.log("MongoDB Connected"))
   .catch(err => console.log(err));
+
+// 🔥 FIX: socket init moved BEFORE routes
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+  },
+});
 
 // Home Route
 app.get("/", (req, res) => {
@@ -132,32 +144,44 @@ app.get("/users", verifyToken, async (req, res) => {
 //     user: newUser
 //   });
 // });
-app.post("/users", verifyToken, verifyAdmin, async (req, res) => {
-  const { name, email } = req.body;
 
-  if (!name || !email) {
-    return res.status(400).json({ message: "Name & Email required" });
-  }
+// app.post("/users", verifyToken, verifyAdmin, async (req, res) => {
+//   const { name, email } = req.body;
 
-  const newUser = new User({ name, email });
-  await newUser.save();
-
-  res.json({ message: "User added", user: newUser });
-});
-
-//   } catch (err) {
-//     console.error("ADD USER ERROR:", err);   // ✅ better debug
-//     res.status(500).json({ message: "Server error" });
+//   if (!name || !email) {
+//     return res.status(400).json({ message: "Name & Email required" });
 //   }
-// });
-app.put("/users/:id", async (req, res) => {
-  const updatedUser = await User.findByIdAndUpdate(
-    req.params.id,
-    req.body,
-    { new: true }
-  );
 
-  res.json(updatedUser);
+//   const newUser = new User({ name, email });
+//   await newUser.save();
+
+//   res.json({ message: "User added", user: newUser });
+// });
+
+// 🔥 FIXED CREATE ROUTE
+app.post("/users", verifyToken, async (req, res) => {
+  try {
+    const { name, email } = req.body;
+
+    if (!name || !email) {
+      return res.status(400).json({ message: "Name & Email required" });
+    }
+
+    const newUser = new User({ name, email });
+    await newUser.save();
+
+    // 🔥 ADD THIS
+    io.emit("userAdded", newUser);
+
+    res.json({
+      message: "User created successfully",
+      user: newUser
+    });
+
+  } catch (err) {
+    console.error("ADD USER ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
 // ❌ FIXED UPDATE (only error part changed)
@@ -171,16 +195,41 @@ app.put("/users/:id", verifyToken, async (req, res) => {
 
   await user.save();   // ✅ FIX
 
+  // 🔥 ADD THIS
+  console.log("UPDATED USER:", user);
+  io.emit("userUpdated", {
+  _id: user._id,
+  name: user.name,
+  email: user.email
+});
+
   res.json({ message: "Updated", user });
 });
 
 // ❌ FIXED DELETE (only error part changed)
-app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
-  await User.findByIdAndDelete(req.params.id);
-  res.json({ message: "Deleted" });
+app.delete("/users/:id", verifyToken, async (req, res) => {
+  await User.findByIdAndDelete(req.params.id);   // ✅ FIX
+
+  // 🔥 ADD THIS
+  io.emit("userDeleted", req.params.id);
+
+  res.json({ message: "User deleted successfully" });
+});
+
+// socket connection
+io.on("connection", (socket) => {
+  console.log("User connected:", socket.id);
+
+  socket.on("disconnect", () => {
+    console.log("User disconnected");
+  });
 });
 
 // Start Server
-app.listen(3000, () => {
+// app.listen(3000, () => {
+//   console.log("Server running on port 3000");
+// });
+
+server.listen(3000, () => {
   console.log("Server running on port 3000");
 });
